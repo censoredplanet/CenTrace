@@ -1,5 +1,5 @@
 ---
-name: CenFuzz
+name: CenTrace
 
 on:
  push:

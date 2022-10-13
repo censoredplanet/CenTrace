@@ -64,7 +64,7 @@ The following flags can be provided for analyzing pcaps:
 The `CenTrace` tool provides two functions:
 1. Run traceroute measurements across a list of endpoints: 
 ```
-sudo python3 traceroute.py --filename examples/input.csv -o examples/output.csv -v -l examples/log.txt --iprr --comparequoted -r 5 -R 120 -p -pd examples/pcaps -m 2 -i enp1s0f1 -rv routeviews_file -an asnames_file
+sudo python3 traceroute.py --filename examples/input.csv -o examples/output.csv -v -l examples/log.txt --iprr --comparequoted -r 5 -R 120 -p -pd examples/pcaps -m 2 -i enp1s0f1 -rv routeviews_file -an asnames_file --https -cr 2 -mi 3
 ```
 2. Analyze pcaps:
  ```
