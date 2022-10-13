@@ -1,5 +1,5 @@
 # CenTrace
-[![Tests](https://github.com/censoredplanet/CenTrace/workflows/Tests/badge.svg)](https://github.com/censoredplanet/Tests/actions)
+[![Tests](https://github.com/censoredplanet/CenTrace/workflows/CenTrace/badge.svg)](https://github.com/censoredplanet/CenTrace/actions)
 
 *Are you using `CenTrace`? If so, let us know! Shoot us an email at censoredplanet@umich.edu.*
 
