@@ -56,6 +56,7 @@ The following flags can be provided for analyzing pcaps:
 | asnames_file           | Required                 | AS Number to Name mapping from [`pyasn`](https://github.com/hadiasghari/pyasn/blob/master/pyasn-utils/pyasn_util_asnames.py)                 |                                            |
 | file                  | ""                       | Specific filename to parse                             |                               |
 | file2                 | ""                       | Filename to compare with previous argument             |                               |
+| cached                | ""                       | Filename of previously parsed pcap data to continue    |                               |
 | summary               | False                    | Print summary of all probes in directory               |                               |
 | outfile                | stdout                  | A csv file to write final output in                   | `examples/analyzed_output.csv`|
 
