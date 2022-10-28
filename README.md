@@ -1,5 +1,6 @@
 # CenTrace
 [![Tests](https://github.com/censoredplanet/CenTrace/workflows/CenTrace/badge.svg)](https://github.com/censoredplanet/CenTrace/actions)
+[![DOI](https://zenodo.org/badge/547397275.svg)](https://zenodo.org/badge/latestdoi/547397275)
 
 *Are you using `CenTrace`? If so, let us know! Shoot us an email at censoredplanet@umich.edu.*
 
