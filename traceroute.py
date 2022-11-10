@@ -1,11 +1,11 @@
-""" Usage: traceroute.py -s <vantage point IP> -c <censored keyword> -u <uncensored keyword> [--https] [--outfile <filename>]
+""" Usage: traceroute.py -s <vantage point IP> -c <censored keyword> -u <uncensored keyword> [--application-protocol https] [--outfile <filename>]
 
 Launches increasing-TTL probes with both censored and uncensored keywords.
-If https is set, launches HTTPS probes pre-recorded TLS ClientHello.
+If application protocol is set to DNS or HTTPS, launches HTTPS probes with TLS ClientHello or DNS with Query.
 Otherwise launches HTTP probe with keyword as HTTP Host header.
 
 To read from file, can run:
-  probe.py -f <filepath> -u <uncensored keyword [--https] [--outfile <filename>]
+  probe.py -f <filepath> -u <uncensored keyword [--application-protocol https] [--outfile <filename>]
 
 File should be a CSV with the server IP in the first column and the censored keyword in the second.
 For instance:
@@ -32,12 +32,14 @@ import sniffer
 import time
 
 import tcp
+import udp
 import asn
 
 
 from scapy.all import *
 load_layer("http")
 load_layer("tls")
+load_layer("dns")
 
 DEFAULT_UNCENSORED_KEYWORD = "example.com"
 
@@ -45,7 +47,7 @@ MAX_JOBS_IN_QUEUE = 128
 
 ICMP_RESPONSES = ("ICMP_TTL", "ICMP_OTHER")
 TCP_RESPONSES = ("RST", "FIN", "ACK")
-APP_RESPONSES = ("TLS", "HTTP")
+APP_RESPONSES = ("TLS", "HTTP", "DNS")
 OTHER_RESPONSES = ("HANDSHAKE_TIMEOUT", "TIMEOUT")
 
 # This determines the precedence of response types. That is, if a packet contains
@@ -53,6 +55,10 @@ OTHER_RESPONSES = ("HANDSHAKE_TIMEOUT", "TIMEOUT")
 # (ACK, TLS) layers, we consider that a valid TLS response.
 # Make this RESPONSE_PRECEDENCE = () to view all layers
 RESPONSE_PRECEDENCE = (*list(ICMP_RESPONSES), *list(APP_RESPONSES), *list(TCP_RESPONSES))
+
+# Set port numbers
+TCP_PORTS = {'http':80,'https':443}
+UDP_PORTS = {'dns':53}
 
 def set_default(obj):
     if isinstance(obj, set):
@@ -86,9 +92,10 @@ class TTLProbe(ABC):
         self.pcap_dir = pcap_dir
         self.pcap_file = pcap_file
         self.tcp_conn = None
+        self.udp_conn = None
 
     def get_probe_data(self, hostname):
-      """ Retrieves or constructs probe TCP payload for a particular keyword/hostname. """
+      """ Retrieves or constructs probe TCP/UDP payload for a particular keyword/hostname. """
       if self._probedata is None or self._hostname != hostname:
         self._probedata = self._build_probe_data(hostname)
         self._hostname = hostname
@@ -96,7 +103,7 @@ class TTLProbe(ABC):
 
     @abstractmethod
     def _build_probe_data(self, hostname):
-      """ Constructs TCP payload using a particular keyword/hostname for this probe. 
+      """ Constructs TCP/UDP payload using a particular keyword/hostname for this probe. 
 
       We don't know what kind of probe we are, so we can't do it in the base class. """
       raise NotImplementedError
@@ -371,6 +378,48 @@ class HTTPSProbe(TTLProbe):
             payload += packet["TLS"].show(dump=True) + ";"
         return layers, quoted_differences, payload, verbose_output
 
+class DNSProbe(TTLProbe):
+    def __init__(self, server_ip, iprr, verbose, comparequoted, rate, save_pcaps, pcap_dir, pcap_file, dport=53, max_ttl=64, timeout=3, iface=None):
+        super().__init__(server_ip, iprr, verbose, comparequoted, rate, save_pcaps, pcap_dir, pcap_file, dport, max_ttl, timeout, iface=iface)
+    
+    def _build_probe_data(self, hostname):
+        return DNS(rd=1, qd=DNSQR(qname=hostname))
+
+    def _get_layers(self, req, packet, verbose_output):
+        # TODO:: differentiate different types of TLS responses
+        layers, quoted_differences, payload, verbose_output = super()._get_layers(req, packet, verbose_output)
+        if packet.haslayer("DNS"):
+            layers.add("DNS")
+            payload += packet["DNS"].show(dump=True) + ";"
+        return layers, quoted_differences, payload, verbose_output
+    
+    def single_probe(self, data, ttl, port, verbose_output):
+        """ Run a single UDP probe """
+        self.udp_conn = udp.UDPSession(self.server_ip, self.dport, sport=port, timeout=self._timeout)
+
+        if self.verbose:
+            verbose_output += "Hop: " + str(ttl) + "\n"
+        if self.iprr:
+            self.udp_conn.set_iprr()
+        
+        req = None
+        responses = []
+        try:
+            req, responses = self.udp_conn.sendrecv(data, ttl, retries=3)
+        except Exception as e:
+            sys.stderr.write("Packet sending error: " + str(e) + "\n") #Debug
+            return [(ttl, None, "ERROR SENDING PACKET", "", "")], verbose_output
+
+        results = []
+        for packet in responses:
+            result_type, quoted_differences, payload, verbose_output = self.process_response_packet(req, packet, verbose_output)
+            results.append((ttl, packet[IP].src, result_type, quoted_differences, payload))
+
+        if len(results) == 0:
+            results.append((ttl, None, "TIMEOUT", None, ""))
+
+        return results, verbose_output
+
 def _probe_result_to_as(result):
   hop, src_ip, _, _, _ = result
   if src_ip is not None:
@@ -388,12 +437,13 @@ def _results_to_as_list(results):
     ases.append(_probe_result_to_as(probe_result))
   return tuple(ases)
 
-def make_probe(server_ip, https=False, iprr=False, verbose=False, comparequoted=False, rate=3, save_pcaps=False, pcap_dir="pcaps", pcap_file = "", iface=None):
+def make_probe(server_ip, application_protocol="http", iprr=False, verbose=False, comparequoted=False, rate=3, save_pcaps=False, pcap_dir="pcaps", pcap_file = "", iface=None):
     """ probe factory """
-    if https:
-        return HTTPSProbe(server_ip, iprr, verbose, comparequoted, rate, save_pcaps, pcap_dir, pcap_file, iface=iface)
-    return HTTPProbe(server_ip, iprr, verbose, comparequoted, rate, save_pcaps, pcap_dir, pcap_file, iface=iface)
-
+    if application_protocol == "https":
+        return HTTPSProbe(server_ip, iprr, verbose, comparequoted, rate, save_pcaps, pcap_dir, pcap_file)
+    elif application_protocol == "dns":
+        return DNSProbe(server_ip, iprr, verbose, comparequoted, rate, save_pcaps, pcap_dir, pcap_file)
+    return HTTPProbe(server_ip, iprr, verbose, comparequoted, rate, save_pcaps, pcap_dir, pcap_file)
 
 def responses_differ(censored_responses, control_responses):
     if len(censored_responses) != len(control_responses):
@@ -408,11 +458,11 @@ def responses_differ(censored_responses, control_responses):
       return censored_response[0][4] != control_response[0][4]
     return True # Default to performing probes if we are unsure
 
-def run_and_compare(server_ip, censored_keyword, uncensored_keyword="example.com", https=False, iprr=False, verbose=False, comparequoted=False, verbose_output="", rate=3, save_pcaps=False, pcap_dir="pcaps", iface=None, consistent_runs=5, max_iterations=11):
+def run_and_compare(server_ip, censored_keyword, uncensored_keyword="example.com", application_protocol="http", iprr=False, verbose=False, comparequoted=False, verbose_output="", rate=3, save_pcaps=False, pcap_dir="pcaps", iface=None, consistent_runs=5, max_iterations=11):
     """ runs ttl probes for both censored & uncensored keywords """
     # TODO:: due to load-balancing, the IPs on these two paths can occasionally differ,
     # though they are often in the same subnet
-    probe = make_probe(server_ip, https, iprr, verbose, comparequoted, rate, save_pcaps, pcap_dir, censored_keyword, iface)
+    probe = make_probe(server_ip, application_protocol, iprr, verbose, comparequoted, rate, save_pcaps, pcap_dir, censored_keyword, iface)
 
     # Test whether responses differ.
     censored_response = probe.full_probe_response(censored_keyword)
@@ -432,36 +482,43 @@ def run_and_compare(server_ip, censored_keyword, uncensored_keyword="example.com
     
     return censored, uncensored, iprr, verbose_output
 
-def is_ip_alive(server_ip, dport, interface=None,retries=3):
+def is_ip_alive(server_ip, dport, uncensored_keyword, interface=None,retries=3):
     alive = False
     for _ in range(retries):
-        tcp_conn = tcp.TCPSession(server_ip, dport, interface=interface)
-        if not tcp_conn.handshake():
-            continue
-        if tcp_conn.close():
+        if dport in TCP_PORTS.values():
+            tcp_conn = tcp.TCPSession(server_ip, dport)
+            if not tcp_conn.handshake():
+                verbose_output += "No handshake\n"
+                continue
+            if tcp_conn.close():
+                alive = True
+                break
+        if dport in UDP_PORTS.values():
+            udp_conn = udp.UDPSession(server_ip, dport)
+            if not udp_conn.handshake(uncensored_keyword):
+                continue
             alive = True
             break
         time.sleep(3)
     return alive
 
-def cli(server_ip, censored_keyword, uncensored_keyword, https=False, iprr = False, verbose = False, comparequoted=False, tracebox=False, rate=3, save_pcaps=False, pcap_dir="pcaps", iface=None, consistent_runs=5, max_iterations=11):
+def cli(server_ip, censored_keyword, uncensored_keyword, application_protocol="http", iprr = False, verbose = False, comparequoted=False, tracebox=False, rate=3, save_pcaps=False, pcap_dir="pcaps", iface=None, consistent_runs=5, max_iterations=11):
     logging.info(server_ip)
     #Intialize empty string for verbose output
     verbose_output = ""
     if verbose:
         verbose_output = "\n\n****************************************\n"
         verbose_output += server_ip + "," + censored_keyword +  "\n"
-    
-    if https:
-        alive = is_ip_alive(server_ip, 443, iface)
-    else:
-        alive = is_ip_alive(server_ip, 80, iface)
-    
+
+    if application_protocol in TCP_PORTS:
+        alive = is_ip_alive(server_ip, TCP_PORTS[application_protocol],uncensored_keyword)
+    else: 
+        alive = is_ip_alive(server_ip, UDP_PORTS[application_protocol],uncensored_keyword)
     if not alive:
         verbose_output += "Server IP not responding to TCP handshake"
         return None, verbose_output
 
-    censored, uncensored, iprr, verbose_output = run_and_compare(server_ip, censored_keyword, uncensored_keyword, https, iprr, verbose, comparequoted, verbose_output, rate, save_pcaps, pcap_dir, iface, consistent_runs, max_iterations)
+    censored, uncensored, iprr, verbose_output = run_and_compare(server_ip, censored_keyword, uncensored_keyword, application_protocol, iprr, verbose, comparequoted, verbose_output, rate, save_pcaps, pcap_dir, iface, consistent_runs, max_iterations)
     if censored is None: # Skip scan since pcaps already exist
         return "", verbose_output
     if tracebox:
@@ -474,7 +531,7 @@ def cli(server_ip, censored_keyword, uncensored_keyword, https=False, iprr = Fal
     return output, verbose_output
 
 
-def cli_file(filename, uncensored, https=False, iprr = False, verbose = False, comparequoted = False, tracebox = False, rate=3, separation=120, max_threads=1, save_pcaps=False, pcap_dir="pcaps", iface=None, consistent_runs=5, max_iterations=11, outfile=sys.stdout, verbose_file=sys.stderr):
+def cli_file(filename, uncensored, application_protocol="http", iprr = False, verbose = False, comparequoted = False, tracebox = False, rate=3, separation=120, max_threads=1, save_pcaps=False, pcap_dir="pcaps", iface=None, consistent_runs=5, max_iterations=11, outfile=sys.stdout, verbose_file=sys.stderr):
     with open(filename) as csvfile:
         filereader = csv.reader(csvfile)
 
@@ -499,13 +556,13 @@ def cli_file(filename, uncensored, https=False, iprr = False, verbose = False, c
                 else:
                     loopVar += 1
         for measurement_count, measurement_dict in schedule.items():
-            sys.stderr.write("Measurement Round: " + str(measurement_count) + "\r")
+            #sys.stderr.write("Measurement Round: " + str(measurement_count) + "\r")
             with concurrent.futures.ThreadPoolExecutor(max_workers=max_threads) as executor: 
                 #Batch internally to avoid using up too much RAM
                 jobs = {}
                 while len(measurement_dict) > 0:
                     for server_ip, censored_keyword in measurement_dict.items():
-                        future_to_cli = executor.submit(cli, server_ip, censored_keyword, uncensored, https, iprr, verbose, comparequoted, tracebox, rate, save_pcaps, pcap_dir, iface, consistent_runs, max_iterations)
+                        future_to_cli = executor.submit(cli, server_ip, censored_keyword, uncensored, application_protocol, iprr, verbose, comparequoted, tracebox, rate, save_pcaps, pcap_dir, iface, consistent_runs, max_iterations)
                         jobs[future_to_cli] = server_ip
                         #Break if too many jobs are assigned. More jobs can be assigned to all workers when current set is done. 
                         if len(jobs) > MAX_JOBS_IN_QUEUE:
@@ -536,7 +593,7 @@ if __name__ == "__main__":
     parser.add_argument("-c", "--censored_keyword", type=str)
     parser.add_argument("-u", "--uncensored_keyword", type=str)
     parser.add_argument("-s", "--server_ip", type=str)
-    parser.add_argument("--https", action="store_true")
+    parser.add_argument("-a", "--application_protocol", type=str)
     #Flag for verbose output which prints packets
     parser.add_argument("-v","--verbose", action="store_true")
     #Flag for setting whether to send record route in IP header
@@ -561,7 +618,7 @@ if __name__ == "__main__":
     parser.add_argument("-mi", "--max_iterations", type=int)
     parser.add_argument("-rv", "--routeviews_file", type=str)
     parser.add_argument("-an", "--asnames_file", type=str)
-    parser.set_defaults(https=False, verbose=False, iprr=False, comparequoted=False, tracebox=False, filename="", server_ip="", outfile="",verbosefile="",max_threads=1, rate=3, save_pcaps=False, pcap_dir="pcaps", interface=None, separation=120, uncensored_keyword=DEFAULT_UNCENSORED_KEYWORD, consistent_runs=5,max_iterations=11,routeviews_file="",asnames_file="")
+    parser.set_defaults(application_protocol="http", verbose=False, iprr=False, comparequoted=False, tracebox=False, filename="", server_ip="", outfile="",verbosefile="",max_threads=1, rate=3, save_pcaps=False, pcap_dir="pcaps", interface=None, separation=120, uncensored_keyword=DEFAULT_UNCENSORED_KEYWORD, consistent_runs=5,max_iterations=11,routeviews_file="",asnames_file="")
 
     args = parser.parse_args()
 
@@ -599,7 +656,7 @@ if __name__ == "__main__":
         if not args.censored_keyword:
           logging.error("Need to provide --censored_keyword to test probe with.")
           sys.exit(1)
-        output, verbose_output = cli(args.server_ip, args.censored_keyword, args.uncensored_keyword, args.https, args.iprr, args.verbose, args.comparequoted, args.tracebox, args.rate, args.save_pcaps, pcap_dir, args.interface, args.consistent_runs, args.max_iterations)
+        output, verbose_output = cli(args.server_ip, args.censored_keyword, args.uncensored_keyword, args.application_protocol, args.iprr, args.verbose, args.comparequoted, args.tracebox, args.rate, args.save_pcaps, pcap_dir, args.interface, args.consistent_runs, args.max_iterations)
         if args.verbose:
             stderr.write(verbose_output)
             stderr.flush()
@@ -607,7 +664,7 @@ if __name__ == "__main__":
         stdout.write(output)
         stdout.flush()
       elif args.filename:
-        cli_file(args.filename, args.uncensored_keyword, args.https, args.iprr, args.verbose, args.comparequoted, args.tracebox, args.rate, args.separation, args.max_threads, args.save_pcaps, pcap_dir, args.interface, args.consistent_runs, args.max_iterations, stdout, stderr)
+        cli_file(args.filename, args.uncensored_keyword, args.application_protocol, args.iprr, args.verbose, args.comparequoted, args.tracebox, args.rate, args.separation, args.max_threads, args.save_pcaps, pcap_dir, args.interface, args.consistent_runs, args.max_iterations, stdout, stderr)
       else:
         logging.error("Need to provide either --server_ip or --filename.")
         sys.exit(1)
