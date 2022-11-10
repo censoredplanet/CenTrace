@@ -5,7 +5,7 @@
 
 *Are you using `CenTrace`? If so, let us know! Shoot us an email at censoredplanet@umich.edu.*
 
-`CenTrace` is a general-purpose application-layer censorship traceroute tool, that sends TTL-limited HTTP and TLS packets to detect the network locations of censorship devices. `CenTrace` can perform requests to different endpoints parallely using specified domains. It first tests to see whether there is any sign of interference for a particular measurement, by comparing responses with a control measurement. If there is an indication of blocking, it then performs multiple repetitions of two traceroutes to the endpoint - one with the test domain and the other with a control domain- to determine the network path to the endpoint, and the exact location of the blocking. `CenTrace` has the following features:
+`CenTrace` is a general-purpose application-layer censorship traceroute tool, that sends TTL-limited HTTP, TLS, and DNS packets to detect the network locations of censorship devices. `CenTrace` can perform requests to different endpoints parallely using specified domains. It first tests to see whether there is any sign of interference for a particular measurement, by comparing responses with a control measurement. If there is an indication of blocking, it then performs multiple repetitions of two traceroutes to the endpoint - one with the test domain and the other with a control domain- to determine the network path to the endpoint, and the exact location of the blocking. `CenTrace` has the following features:
 1.  It can detect censorship devices that inject packets (such as a TCP RST packet or a blockpage) as well as devices that drop packets (and induce a timeout).
 2.  `CenTrace` can differentiate between in-path (processing packets at line rate) and on-path (receiving only a copy of the packets) devices.  
 3.  `CenTrace` accounts for stateful blocking by including a customizable delay between successive traceroutes and measurements. 
@@ -31,7 +31,7 @@ The following flags can be provided for running measurements:
 | censored_keyword       | `example.com`            | Domain to include in control measurements              | `example.com`                              |
 | server_ip              | Required if no filename  | IP of endpoint to send measurements to                 | `1.1.1.1`                                  |
 | verbose                | False                    | Print debug output                                     |                                            |
-| https                  | False                    | Send HTTP (false) or TLS (true) measurements           |                                            |
+| application_protocol                  | http                    | Send HTTP (http), TLS (https) or DNS (dns) measurements           |                                            |
 | iprr                   | False                    | Try including IP record route option if true           |                                            |
 | tracebox               | False                    | Run a Tracebox measurement additionally (requires [Tracebox](http://www.tracebox.org/) to be installed) |                                            |
 | interface              | Picked by default        | Interface to send measurements from                    |                                            |
@@ -48,7 +48,7 @@ The following flags can be provided for running measurements:
 | routeviews_file        | Required                 | Data from Routeviews to get ASN information            |                                            |
 | asnames_file           | Required                 | AS Number to Name mapping from [`pyasn`](https://github.com/hadiasghari/pyasn/blob/master/pyasn-utils/pyasn_util_asnames.py)                 |                                            |
 
-The following flags can be provided for analyzing pcaps:
+The following flags can be provided for analyzing pcaps (currently only available for TCP):
 
 |         Flag           |          Default         |                       Function                         |           Example             |
 | ---------------------- | ------------------------ | ------------------------------------------------------ | ----------------------------- |
@@ -67,7 +67,7 @@ The following flags can be provided for analyzing pcaps:
 The `CenTrace` tool provides two functions:
 1. Run traceroute measurements across a list of endpoints: 
 ```
-sudo python3 traceroute.py --filename examples/input.csv -o examples/output.csv -v -l examples/log.txt --iprr --comparequoted -r 5 -R 120 -p -pd examples/pcaps -m 2 -i enp1s0f1 -rv routeviews_file -an asnames_file --https -cr 2 -mi 3
+sudo python3 traceroute.py --filename examples/input.csv -o examples/output.csv -v -l examples/log.txt --iprr --comparequoted -r 5 -R 120 -p -pd examples/pcaps -m 2 -i enp1s0f1 -rv routeviews_file -an asnames_file --application_protocol https -cr 2 -mi 3
 ```
 2. Analyze pcaps:
  ```
