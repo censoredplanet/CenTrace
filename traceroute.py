@@ -488,7 +488,6 @@ def is_ip_alive(server_ip, dport, uncensored_keyword, interface=None,retries=3):
         if dport in TCP_PORTS.values():
             tcp_conn = tcp.TCPSession(server_ip, dport)
             if not tcp_conn.handshake():
-                verbose_output += "No handshake\n"
                 continue
             if tcp_conn.close():
                 alive = True
