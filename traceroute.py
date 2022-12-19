@@ -9,8 +9,8 @@ To read from file, can run:
 
 File should be a CSV with the server IP in the first column and the censored keyword in the second.
 For instance:
-  1.2.3.4, facebook.com
-  5.6.7.8, nytimes.com
+  1.2.3.4, facebook.com, AS1
+  5.6.7.8, nytimes.com, AS2
 
 If outfile is not provided, results are written to stdout.
 """
