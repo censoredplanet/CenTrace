@@ -75,7 +75,7 @@ python3.9 pcap_parse.py --dir examples/pcaps/ -rv routeviews_file -an asnames_fi
 ```
 
 ## Disclaimer
-Russing `CenTrace` from your machine may place you at risk if you use it within a highly censoring regime. `CenTrace` takes actions that try to trigger censoring middleboxes multiple times, and try to interfere with the functioning of the middlebox. Therefore, please exercice caution while using the tool, and understand the risks of running `CenTrace` before using it on your machine. Please refer to [our paper](https://ramakrishnansr.org/publications) for more information. 
+Using `CenTrace` from your machine may place you at risk if you use it within a highly censoring regime. `CenTrace` takes actions that try to trigger censoring middleboxes multiple times, and try to interfere with the functioning of the middlebox. Therefore, please exercice caution while using the tool, and understand the risks of running `CenTrace` before using it on your machine. Please refer to [our paper](https://ramakrishnansr.org/publications) for more information. 
 
 ## Data
 The fuzzing measurement data from the study in [our paper](https://ramakrishnansr.org/publications) can be found [here](https://drive.google.com/drive/folders/1pZWOJWDnX_0_BmXrfvC_9WOrurcPZ4lF?usp=sharing). 
